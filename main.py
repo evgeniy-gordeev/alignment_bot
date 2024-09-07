@@ -1,50 +1,64 @@
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import telebot
 from telebot import types
-import time
 
-bot = telebot.TeleBot(token="7516439034:AAF59uroLK2LSSrcTjHeT5oWZ05stCazCJw")
+# Инициализация бота с вашим токеном
+bot = telebot.TeleBot("7516439034:AAF59uroLK2LSSrcTjHeT5oWZ05stCazCJw")
 
+# Название модели и устройство
+model_name = 'test_trainer/checkpoint-18'
+device = "cpu" if not torch.cuda.is_available() else "cuda"
+
+# Загрузка токенизатора и модели
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForCausalLM.from_pretrained(model_name).to(device)
+
+# Переменная состояния для отслеживания выбранного ассистента
+user_state = {}
+
+# Обработчик стартовой команды и меню выбора ассистента
 @bot.message_handler(commands=['start'])
-def handle_start(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=3)
-    itembtn_str1 = types.KeyboardButton('Финансовый')
-    itembtn_str2 = types.KeyboardButton('Тревел')
-    itembtn_str3 = types.KeyboardButton('Авто')
-    markup.add(itembtn_str1, itembtn_str2, itembtn_str3)
-    bot.send_message(message.chat.id, "Пожалуйста выберите необходимый инструмент.", reply_markup=markup)
+def start(message):
+    # Создание кнопок выбора ассистента
+    markup = types.ReplyKeyboardMarkup(row_width=2)
+    btn1 = types.KeyboardButton('Финансовый')
+    btn2 = types.KeyboardButton('Тревел')
+    markup.add(btn1, btn2)
 
+    # Отправка сообщения с кнопками
+    bot.send_message(message.chat.id, "Выберите ассистента:", reply_markup=markup)
 
-@bot.message_handler(func=lambda message: message.text == "Финансовый")
-def finance(message):
-    """
-    a lot of code here
-    :param message:
-    :return:
-    """
-    bot.send_message(message.chat.id, 'Здравсвуйте, чем я могу вам помочь?')
+# Обработчик выбора ассистента
+@bot.message_handler(func=lambda message: message.text in ['Финансовый', 'Тревел'])
+def choose_assistant(message):
+    if message.text == 'Финансовый':
+        user_state[message.chat.id] = 'financial'
+        bot.send_message(message.chat.id, "Привет! Я ваш финансовый ассистент. Чем могу помочь?")
+    elif message.text == 'Тревел':
+        user_state[message.chat.id] = 'travel'
+        bot.send_message(message.chat.id, "Тревел ассистент пока не активен.")
 
-@bot.message_handler(func=lambda message: message.text == "Тревел")
-def travel(message):
-    """
-    a lot of code here
-    :param message:
-    :return:
-    """
-    bot.send_message(message.chat.id, 'Здравсвуйте, чем я могу вам помочь?')
+# Обработчик сообщений после выбора ассистента
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    if message.chat.id in user_state:
+        if user_state[message.chat.id] == 'financial':
+            user_input = message.text  # Получение сообщения пользователя
 
-@bot.message_handler(func=lambda message: message.text == "Авто")
-def auto(message):
-    """
-    a lot of code here
-    :param message:
-    :return:
-    """
-    bot.send_message(message.chat.id, 'Здравсвуйте, чем я могу вам помочь?')
+            # Токенизация сообщения
+            inputs = tokenizer(user_input, return_tensors="pt").to(device)
 
+            # Генерация ответа
+            outputs = model.generate(**inputs, prompt_lookup_num_tokens=9, use_cache=True, max_new_tokens=100)
 
-while True:
-    try:
-        bot.polling(none_stop=True)
-    except Exception as e:
-        print(e)
-        time.sleep(15)
+            # Декодирование и отправка ответа пользователю
+            response = tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
+            bot.reply_to(message, response)
+        elif user_state[message.chat.id] == 'travel':
+            bot.reply_to(message, "Тревел ассистент в разработке.")
+    else:
+        bot.send_message(message.chat.id, "Пожалуйста, выберите ассистента, используя команду /start.")
+
+# Запуск бота
+bot.polling()
